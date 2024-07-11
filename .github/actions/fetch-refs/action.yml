@@ -1,0 +1,15 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: "Fetch Code"
+description: "fetch code from GitHub"
+inputs:
+  depth:
+    description: depth for git fetch command
+    default: "2000"
+runs:
+  using: "composite"
+  steps:
+    - name: FetchRefs
+      run: git fetch --no-tags --prune --depth=${{ inputs.depth }} origin +refs/heads/*:refs/remotes/origin/*
+      shell: bash

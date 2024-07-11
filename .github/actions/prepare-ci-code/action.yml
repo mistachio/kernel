@@ -1,0 +1,17 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: "Prepare CI Code"
+description: download ci code from 5.4.143-velinux branch
+runs:
+  using: "composite"
+  steps:
+    - name: PrepareCICode
+      run: |
+        set -e
+
+        target=tmp
+        branch=5.4.143-velinux
+
+        git clone -b $branch ${{ github.server_url }}/${{ github.repository }}.git $target
+      shell: bash

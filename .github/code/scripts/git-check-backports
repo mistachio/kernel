@@ -1,0 +1,185 @@
+#!/usr/bin/env python3
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+import sys
+import argparse
+import subprocess
+import re
+from collections import defaultdict
+import logging
+
+'''
+Check backport commits in range:
+
+- Have upstream ID
+- Fixes are also backported
+- Fixes to fixes are also backported
+'''
+upstream_patterns = [
+    re.compile(r"commit\s+([0-9a-f]{12,40})\s+upstream"),
+    re.compile(r"upstream\s+commit\s+([0-9a-f]{12,40})"),
+    re.compile(r"cherry picked from commit ([0-9a-f]{12,40})"),
+]
+
+class Commit(object):
+
+    def __init__(self, commit_id, subject, message):
+        self.commit_id = commit_id
+        self.subject = subject
+        self.message = message
+        self.fixes = self.parse_fixes(message)
+        self.upstream_commit_ids = self.parse_upstreams(message)
+
+    def parse_fixes(self, message):
+        for line in message.splitlines():
+            line = line.strip()
+            if line.lower().startswith("fixes:"):
+                fs = line.split()
+                if len(fs) > 1:
+                    return fs[1][:12]
+
+    def parse_upstreams(self, message):
+        ret = []
+        for line in message.splitlines():
+            line = line.strip().lower()
+            for pt in upstream_patterns:
+                m = pt.search(line)
+                if m:
+                    ret.append(m.group(1))
+        return set(ret)
+
+    def __str__(self):
+        return "%s (%s)" % (self.commit_id[:12], self.subject)
+
+class BackportChecker(object):
+    def __init__(self, check_range, lookback, upstream_head, allow_missing_upstream):
+        self.commits = {}
+        self.check_range = check_range
+        self.lookback = lookback
+        self.upstream_head = upstream_head
+        self.allow_missing_upstream = allow_missing_upstream
+        self.failed_commits = []
+
+    def check(self):
+        # These are commit ids in the MR
+        self.downstream_commits = self.collect_commits(self.check_range)
+        if not self.downstream_commits:
+            logging.info("no downstream commit found")
+            return True
+        logging.debug("checking %d downstream commits" % len(self.downstream_commits))
+        # These are upstream commit ids being backported
+        self.lookback_commits = self.collect_commits("{first}~{n}..{first}".format(first=self.downstream_commits[0], n=self.lookback))
+        logging.debug("as well as %d downstream existing commits" % len(self.lookback_commits))
+        self.all_backported_upstream_commits = set()
+        upstream_commits_in_this_backport = set()
+        for x in self.downstream_commits:
+            for i in self.commits[x].upstream_commit_ids:
+                upstream_commits_in_this_backport.add(i)
+                self.all_backported_upstream_commits.add(i)
+        for x in self.lookback_commits:
+            self.all_backported_upstream_commits.add(x)
+        logging.debug("which comes from %d upstream commits" % len(self.all_backported_upstream_commits))
+        upstream_range_begin = self.get_merge_base(list(upstream_commits_in_this_backport) + [self.upstream_head])
+        upstream_range = "{}~1..{}".format(upstream_range_begin, self.upstream_head)
+        upstream_commits = self.collect_commits(upstream_range)
+        logging.debug("upstream earliest commit being checked: %s" % self.commits[upstream_range_begin].subject)
+        logging.debug("which consists of %d total commits" % len(upstream_commits))
+        self.upstream_fixes = defaultdict(set)
+        for c in upstream_commits:
+            co = self.commits[c]
+            if co.fixes:
+                self.upstream_fixes[co.fixes].add(co.commit_id)
+        logging.debug("from there, we found %d upstream fixes to cross-check in the range %s" % (
+            len(self.upstream_fixes),
+            upstream_range))
+        ok = True
+        for i, c in enumerate(self.downstream_commits):
+            co = self.commits[c]
+            ucs = co.upstream_commit_ids
+            logging.info("[%03d/%03d] %s" % (i + 1, len(self.downstream_commits), co.subject))
+            if not ucs:
+                logging.debug("downstream commit %s has no upstream id" % c)
+                if self.allow_missing_upstream:
+                    continue
+                else:
+                    self.failed_commits.append(
+                            (c, "no upstream id")
+                        )
+                    ok = False
+                    continue
+            logging.debug("checking downstream commit %s (backport of %s)" % (c, " and " .join(ucs)))
+            for uc in ucs:
+                if not self.check_upstream_fix(c, uc):
+                    ok = False
+        if self.failed_commits:
+            logging.error("These backport commits need more attention:")
+            for cid, msg in self.failed_commits:
+                  logging.error("%s %s" % (cid, msg))
+        return ok
+
+    def check_upstream_fix(self, downstream_commit, upstream_commit):
+        logging.debug("  searching for fix to commit %s in upstream..." % upstream_commit)
+        ufcs = self.upstream_fixes.get(upstream_commit[:12])
+        if not ufcs:
+            logging.debug("  commit %s has no upstream fix commit" % upstream_commit)
+            return True
+        logging.debug("  downstream commit %s has upstream fix commit %s" % (downstream_commit, ufcs))
+        ok = True
+        for ufc in ufcs:
+            if ufc not in self.all_backported_upstream_commits:
+                logging.debug("  upstream commit %s is NOT backported" % ufc)
+                self.failed_commits.append(
+                        (downstream_commit, "Downstream commit {} needs upstream fix {} which is not backported".format(
+                            self.commits[downstream_commit],
+                            self.commits[ufc]))
+                    )
+                ok = False
+            ok = self.check_upstream_fix(downstream_commit, ufc) and ok
+        return ok
+
+    def get_merge_base(self, commits):
+        if len(commits) == 1:
+            cmd = ['git', 'rev-parse'] + commits
+            return subprocess.check_output(cmd).decode().strip()
+        cmd = ['git', 'merge-base'] + commits
+        return subprocess.check_output(cmd).decode().strip()
+
+    def collect_commits(self, r):
+        fmt = '--- COMMIT ---%n%H%n%s%n%b'
+        cmd = ['git', 'log', '--reverse', '--format=' + fmt, r]
+        out = subprocess.check_output(cmd).decode()
+        ret = []
+        for x in out.split('--- COMMIT ---\n'):
+            if not x.strip():
+                continue
+            try:
+                h, s, b = (x.strip() + "\n\n").split('\n', maxsplit=2)
+                c = Commit(h, s, b)
+                self.commits[h] = c
+                ret.append(h)
+            except Exception as e:
+                logging.error("Failed to parse commit: %s:%s\n" % (e, x))
+        return ret
+
+def parse_args():
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--debug", "-D", action="store_true", help="Enable debug output")
+    parser.add_argument("--range", "-r", required=True, help="backport commit range to check")
+    parser.add_argument("--lookback", "-B", type=int, default=1000, help="how many previous backports to inspect")
+    parser.add_argument("--upstream", "-u", default="upstream/master", help="upstream branch name")
+    parser.add_argument("--allow-missing-upstream", "-s", action="store_true")
+    return parser.parse_args()
+
+def main():
+    args = parse_args()
+    if args.debug:
+        logging.basicConfig(level=logging.DEBUG)
+    else:
+        logging.basicConfig(level=logging.INFO)
+    checker = BackportChecker(args.range, args.lookback, args.upstream,
+                              args.allow_missing_upstream)
+    if not checker.check():
+        sys.exit(1)
+
+main()

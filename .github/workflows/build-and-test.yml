@@ -1,0 +1,37 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: Kernel Build/Test Check
+
+on:
+  workflow_call:
+    secrets:
+      ssh_key:
+        required: true
+
+jobs:
+  build-and-test-kernel:
+    runs-on: [self-hosted]
+    strategy:
+      matrix:
+        arch: [x86_64]
+        distro_code: [buster]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 1
+          ssh-key: ${{ secrets.ssh_key }}
+          set-safe-directory: true
+      - name: PrepareCICode
+        uses: bytedance/kernel/.github/actions/prepare-ci-code@5.4.143-velinux
+      - name: BuildKernel
+        uses: bytedance/kernel/.github/actions/build-kernel@5.4.143-velinux
+        with:
+          arch: ${{ matrix.arch }}
+          distro-code: ${{ matrix.distro_code }}
+      - name: TestKernel
+        uses: bytedance/kernel/.github/actions/test-kernel@5.4.143-velinux
+        with:
+          arch: ${{ matrix.arch }}
+          distro-code: ${{ matrix.distro_code }}

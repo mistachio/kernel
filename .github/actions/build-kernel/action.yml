@@ -1,0 +1,53 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: "Build Kernel"
+description: build kernel from source code
+inputs:
+  arch:
+    description: "architecture for Docker image"
+    required: true
+  distro-code:
+    description: "distro code for the Docker image"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: BuildOSImageWithKernel
+      run: |
+        set -e
+
+        # configurations
+        code_path=${{ github.workspace }}/tmp/.github/code
+        docker_image=kernel_builder:${{ inputs.arch }}-${{ inputs.distro-code }}
+        artifacts_root=$(jq .artifacts < /etc/kci.conf | tr -d \")
+        artifacts_relpath=${{ inputs.arch }}/${{ inputs.distro-code }}/${{ github.event.pull_request.head.sha }}
+        os_image_root=$(jq .images < /etc/kci.conf | tr -d \")
+        os_image=${{ inputs.arch }}-${{ inputs.distro-code }}.qcow2
+        os_image_size=100G
+
+        # build Docker image
+        dockerfile="${{ inputs.arch }}-${{ inputs.distro-code }}.dockerfile"
+        docker build --network=host -t $docker_image -f $code_path/dockerfiles/$dockerfile .
+
+        # build kernel
+        artifacts_dir=$artifacts_root/$artifacts_relpath
+        mkdir -p $artifacts_dir
+        docker run --network=host --rm \
+          -v ${{ github.workspace }}:/linux/src \
+          -v $artifacts_dir:/linux/output \
+          -v $code_path/scripts/build.sh:/bin/build.sh \
+          $docker_image \
+          build.sh -j32
+
+        # create OS image
+        source_image_path=$os_image_root/$os_image
+        target_image_path=$artifacts_root/$artifacts_relpath/$os_image
+        cp $source_image_path $target_image_path
+        qemu-img resize $target_image_path $os_image_size
+        virt-customize \
+          -a $target_image_path \
+          --root-password password:kernelci \
+          --ssh-inject root \
+          --copy-in $code_path/configs/ltp-whitelist:/opt
+      shell: bash

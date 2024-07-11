@@ -1,0 +1,48 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: LTP
+repo:
+  url: https://github.com/linux-test-project/ltp.git
+  branch: master
+  timeout: 120
+before_test:
+  script:
+    - apt-get update -y
+    - apt install -y gcc git make pkgconf autoconf automake bison flex m4 libc6-dev ntpdate ntp ethtool
+    - hwclock -w
+    - cd ltp && make autotools && ./configure && make -j$(nproc) && make install && mkdir -p /ltp_log
+  timeout: 720
+  repeat_on_fail: 3
+test:
+  script:
+    - |
+      if [ `uname -r | grep "6.6"` ]; then 
+        /opt/ltp/runltp -p -d /ltp_log -l /ltp_log/result -o /ltp_log/output -C /ltp_log/failed -T /ltp_log/conf -f syscalls -S /opt/ltp_whitelist || true
+      else 
+        /opt/ltp/runltp -p -d /ltp_log -l /ltp_log/result -o /ltp_log/output -C /ltp_log/failed -T /ltp_log/conf -f syscalls || true
+      fi
+    - |
+      if [ ! -f /ltp_log/failed ]; then
+              exit 0
+      fi
+      for i in {1..5}; do
+              succeed=1
+              while read cmd; do
+                      echo Retry command $cmd for $i times
+                      if ! eval /opt/ltp/testcases/bin/$cmd; then
+                              echo Retry failed
+                              succeed=0
+                              break
+                      fi
+              done < <(cat /ltp_log/failed | cut -d' ' -f2-)
+              if [ $succeed == 1 ]; then
+                      exit 0
+              fi
+      done
+      exit 1
+  timeout: 7200
+  repeat: 1
+log_dir:
+  - /ltp_log
+test_on_kvm: true

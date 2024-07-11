@@ -1,0 +1,59 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: Static Check
+
+on:
+  workflow_call:
+    secrets:
+      ssh_key:
+        required: true
+
+env:
+  COMMIT_RANGE: "origin/${{ github.base_ref }}..HEAD"
+
+jobs:
+  check-format:
+    runs-on: [self-hosted]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2000
+          ssh-key: ${{ secrets.ssh_key }}
+          set-safe-directory: true
+      - name: FetchRefs
+        uses: bytedance/kernel/.github/actions/fetch-refs@5.4.143-velinux
+        with:
+          depth: 2000
+      - name: PrepareCICode
+        uses: bytedance/kernel/.github/actions/prepare-ci-code@5.4.143-velinux
+      - name: CheckFormat
+        run: |
+          set -e
+          code_path=${{ github.workspace }}/tmp/.github/code
+          $code_path/scripts/checkpatch ${{ env.COMMIT_RANGE }}
+  search-fixes:
+    runs-on: [self-hosted]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 2000
+          ssh-key: ${{ secrets.ssh_key }}
+          set-safe-directory: true
+      - name: FetchRefs
+        uses: bytedance/kernel/.github/actions/fetch-refs@5.4.143-velinux
+        with:
+          depth: 2000
+      - name: PrepareCICode
+        uses: bytedance/kernel/.github/actions/prepare-ci-code@5.4.143-velinux
+      - name: SearchFixes
+        run: |
+          set -e
+          code_path=${{ github.workspace }}/tmp/.github/code
+          if ! git remote -v | grep -q upstream; then
+            git remote add upstream https://github.com/torvalds/linux.git || true
+          fi
+          git fetch upstream master -ap
+          $code_path/scripts/git-check-backports -s -r ${{ env.COMMIT_RANGE }} -u upstream/master
