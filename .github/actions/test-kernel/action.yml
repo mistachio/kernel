@@ -1,0 +1,55 @@
+# SPDX-License-Identifier: GPL-2.0-only
+# Copyright (c) 2024 ByteDance.
+
+name: "Test Kernel"
+description: test the Kernel
+inputs:
+  arch:
+    description: "Architecture for the Docker image"
+    required: true
+  distro-code:
+    description: "Distro code for the Docker image"
+    required: true
+runs:
+  using: "composite"
+  steps:
+    - name: PrepareTestEnvironment
+      run: |
+        set -e
+
+        artifacts_root=$(jq .artifacts < /etc/kci.conf | tr -d \")
+        artifacts_dir=$artifacts_root/${{ inputs.arch }}/${{ inputs.distro-code }}/${{ github.event.pull_request.head.sha }}
+        code_path=${{ github.workspace }}/tmp/.github/code
+
+        python3 -m pip install virtualenv
+        python3 -m virtualenv $artifacts_dir/venv
+        source $artifacts_dir/venv/bin/activate 
+
+        pip3 install -r $code_path/configs/ktest-requirements.txt
+        mkdir -p $artifacts_dir/log
+      shell: bash
+    - name: RunKernelTest
+      run: |
+        set -e
+
+        code_path=${{ github.workspace }}/tmp/.github/code
+        artifacts_root=$(jq .artifacts < /etc/kci.conf | tr -d \")
+        artifacts_relpath=${{ inputs.arch }}/${{ inputs.distro-code }}/${{ github.event.pull_request.head.sha }}
+        artifacts_dir=$artifacts_root/$artifacts_relpath
+        image=$artifacts_dir/${{ inputs.arch }}-${{ inputs.distro-code }}.qcow2
+        domain_name=${{ inputs.arch }}-${{ inputs.distro-code }}-${{ github.event.pull_request.head.sha }}
+        test_file=$code_path/tests/ltp.yml
+
+        cp -r $code_path/ktest ktest
+        cd ktest
+        source $artifacts_dir/venv/bin/activate
+
+        ./kernel_test.py kvm \
+            --image $image \
+            --test-kvm $domain_name \
+            --ssh-auth-method sshkey \
+            --ssh-pubkey-file ~/.ssh/id_rsa.pub \
+            --kernel-package-dir $artifacts_dir \
+            --log-dir $artifacts_dir/log \
+            --tests-yml $test_file
+      shell: bash
