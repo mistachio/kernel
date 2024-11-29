@@ -15,7 +15,7 @@ jobs:
     strategy:
       matrix:
         arch: [x86_64]
-        distro_code: [buster]
+        distro_code: ${{ contains('6.6', github.base_ref) && bookworm || buster }}
     steps:
       - name: Checkout
         uses: actions/checkout@v4
