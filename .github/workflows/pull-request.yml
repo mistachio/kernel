@@ -13,4 +13,4 @@ jobs:
   BuildAndTestKernel:
     uses: mistachio/kernel/.github/workflows/build-and-test.yml@5.4.143-velinux
     secrets:
-      ssh_key: ${{ secrets.SSH_KEY }}
+      ssh_key: ${{ secrets.SSH_KEY }} 
