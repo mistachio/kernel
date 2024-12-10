@@ -1,5 +1,9 @@
-ioctl03
-fanotify22
-ioprio_set03
-setsockopt08
-statx04
+execve06 execve06
+inotify12 inotify12
+fanotify14 fanotify14
+openat04 openat04
+semctl09 semctl09
+setsockopt09 setsockopt09
+splice07 splice07
+timerfd_settime02 timerfd_settime02
+wait403 wait403
