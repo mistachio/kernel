@@ -17,11 +17,7 @@ before_test:
 test:
   script:
     - |
-      if [ `uname -r | grep "6.6"` ]; then 
-        /opt/ltp/runltp -p -d /ltp_log -l /ltp_log/result -o /ltp_log/output -C /ltp_log/failed -T /ltp_log/conf -f syscalls -S /opt/ltp_whitelist || true
-      else 
-        /opt/ltp/runltp -p -d /ltp_log -l /ltp_log/result -o /ltp_log/output -C /ltp_log/failed -T /ltp_log/conf -f syscalls || true
-      fi
+      /opt/ltp/runltp -p -d /ltp_log -l /ltp_log/result -o /ltp_log/output -C /ltp_log/failed -T /ltp_log/conf -f syscalls -S /opt/ltp-whitelist || true
     - |
       if [ ! -f /ltp_log/failed ]; then
               exit 0

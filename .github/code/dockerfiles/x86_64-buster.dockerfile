@@ -41,6 +41,13 @@ RUN apt install -y python-dev
 RUN apt install -y python3-dev
 RUN apt install -y sshpass
 RUN apt install -y debhelper
+RUN apt install -y libpci-dev
+RUN apt install -y libcap-dev
+RUN apt install -y systemtap-sdt-dev
+RUN apt install -y libzstd-dev
+RUN apt install -y libbabeltrace-dev
+RUN apt install -y libpfm4-dev
+ENV NO_LIBTRACEEVENT=1
 
 # WA for install pahole>=1.13
 RUN echo "deb http://deb.debian.org/debian bullseye main" >> /etc/apt/sources.list
