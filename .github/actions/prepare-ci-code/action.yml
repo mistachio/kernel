@@ -11,7 +11,7 @@ runs:
         set -e
 
         target=tmp
-        branch=5.4.143-velinux
+        branch=ci-5.4.143-velinux
 
         git clone -b $branch ${{ github.server_url }}/${{ github.repository }}.git $target
       shell: bash
